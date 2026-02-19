@@ -175,7 +175,7 @@ fer_project/
 ### 1 — Environment
 
 ```bash
-git clone https://github.com/yourname/fer_project.git
+git clone [https://github.com/para0107/Live-Facial-Emotion-Recognition](https://github.com/para0107/Live-Facial-Emotion-Recognition)
 cd fer_project
 
 python -m venv .venv
@@ -193,7 +193,7 @@ print("CUDA available:", torch.cuda.is_available())
 print("Device:", torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CPU")
 ```
 
-Training on CPU is possible but will take significantly longer (~8–12 hours vs ~30 minutes on a mid-range GPU).
+Training on CPU is possible but will take significantly longer (~8–12 hours vs ~45 minutes on a mid-range GPU).
 
 ---
 
@@ -345,7 +345,7 @@ Expected: model attends to mouth/cheeks for `happy`, brow region for `angry`, ey
 | + Label smoothing ε=0.1 | ~67% | Better calibration |
 | + Class-weighted loss | ~68% | Disgust F1 improves significantly |
 | + Random erasing p=0.3 | ~69–71% | Holistic features |
-| + Staged freeze/unfreeze | **~70–72%** | **Final configuration** |
+| + Staged freeze/unfreeze | **~68-69%** | **Final configuration** |
 
 *Human accuracy on FER2013 ≈ 65%. Results vary across random seeds.*
 
