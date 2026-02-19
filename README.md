@@ -175,7 +175,7 @@ fer_project/
 ### 1 — Environment
 
 ```bash
-git clone [https://github.com/para0107/Live-Facial-Emotion-Recognition](https://github.com/para0107/Live-Facial-Emotion-Recognition)
+git clone https://github.com/para0107/Live-Facial-Emotion-Recognition
 cd fer_project
 
 python -m venv .venv
