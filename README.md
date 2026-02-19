@@ -343,9 +343,9 @@ Expected: model attends to mouth/cheeks for `happy`, brow region for `angry`, ey
 | ResNet-18, no pretrain, scratch | ~52% | Overfits quickly |
 | ResNet-18, pretrained, full fine-tune | ~65% | Near human-level |
 | + Label smoothing ε=0.1 | ~67% | Better calibration |
-| + Class-weighted loss | ~68% | Disgust F1 improves significantly |
-| + Random erasing p=0.3 | ~69–71% | Holistic features |
-| + Staged freeze/unfreeze | **~68-69%** | **Final configuration** |
+| + Class-weighted loss | ~67-68% | Disgust F1 improves significantly |
+| + Random erasing p=0.3 | ~69% | Holistic features |
+| + Staged freeze/unfreeze | **~69-70%** | **Final configuration** |
 
 *Human accuracy on FER2013 ≈ 65%. Results vary across random seeds.*
 
