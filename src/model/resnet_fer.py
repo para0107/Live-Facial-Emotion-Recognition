@@ -10,8 +10,8 @@ class ResNetFER(nn.Module):
         weights = models.ResNet18_Weights.DEFAULT if pretrained else None
         backbone = models.resnet18(weights=weights)
 
-        # Adapt conv1 from 3-channel RGB to 1-channel grayscale
-        # Average the pretrained weights across the 3 input channels
+        # Adapt conv1 from 3-channel RGB to 1-channel grayscale.
+        # Average the pretrained weights across the 3 input channels.
         old_conv = backbone.conv1
         new_conv = nn.Conv2d(
             1, 64,
@@ -24,11 +24,13 @@ class ResNetFER(nn.Module):
             new_conv.weight = nn.Parameter(old_conv.weight.mean(dim=1, keepdim=True))
         backbone.conv1 = new_conv
 
-        # Keep maxpool but make it smaller so we don't lose too much spatial info
-        # on 48x48 inputs. Replace 3x3 maxpool stride=2 with 2x2 maxpool stride=1.
-        backbone.maxpool = nn.MaxPool2d(kernel_size=2, stride=1, padding=0)
+        # CRITICAL: Remove maxpool entirely.
+        # On 48×48 inputs the default 3×3 stride-2 maxpool (on top of the
+        # stride-2 conv1) destroys spatial resolution too aggressively.
+        # Replace with Identity so feature maps stay at 24×24 after conv1.
+        backbone.maxpool = nn.Identity()
 
-        # Remove the final FC layer (we'll replace it with our own head)
+        # Remove the final FC layer — replaced with our own head below.
         in_features = backbone.fc.in_features  # 512 for ResNet-18
         backbone.fc = nn.Identity()
 
@@ -51,7 +53,7 @@ class ResNetFER(nn.Module):
     def freeze_backbone(self):
         for param in self.features.parameters():
             param.requires_grad = False
-        # Always keep layer4 trainable even when frozen — it's most task-specific
+        # Always keep layer4 trainable — it's the most task-specific layer.
         for param in self.features.layer4.parameters():
             param.requires_grad = True
 

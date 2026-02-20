@@ -25,7 +25,9 @@ function useWebcam() {
     (async () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: 640, height: 480, facingMode: "user" },
+          // Request higher resolution so the displayed feed is sharper.
+          // The browser will negotiate down if the camera can't do 1280×720.
+          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
         });
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
@@ -83,13 +85,20 @@ function useFrameCapture(videoRef, ready, send, connected) {
       lastSentRef.current = now;
       const video = videoRef.current;
       if (!video || video.readyState < 2) return;
+
+      // Always capture at the native video resolution, NOT the CSS display size.
+      // This is what the backend runs face detection on — we want full resolution.
       const W = video.videoWidth;
       const H = video.videoHeight;
+      if (!W || !H) return;
       canvas.width = W;
       canvas.height = H;
-      // Draw UNMIRRORED — server receives normal orientation
+
+      // Draw UNMIRRORED — server receives normal (non-flipped) orientation.
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(video, 0, 0);
+
+      // Use quality 0.92 — good balance between sharpness and bandwidth.
       const frame = canvas.toDataURL("image/jpeg", 0.92);
       send({ frame });
     };
@@ -100,6 +109,9 @@ function useFrameCapture(videoRef, ready, send, connected) {
 }
 
 // ── Face overlay canvas ───────────────────────────────────────────────────────
+// FIX: The overlay canvas must be sized to the VIDEO's native pixel dimensions,
+// not the CSS layout dimensions. Otherwise box coordinates (which come from
+// detection on the native-res frame) are drawn at the wrong positions/scale.
 function FaceOverlay({ faces, videoWidth, videoHeight }) {
   const canvasRef = useRef(null);
 
@@ -112,7 +124,7 @@ function FaceOverlay({ faces, videoWidth, videoHeight }) {
     faces.forEach(({ box, emotion, confidence }) => {
       const meta = EMOTION_META[emotion] || EMOTION_META.neutral;
       const { x: rawX, y, w, h } = box;
-      // Mirror x to match CSS scaleX(-1) on the video element
+      // Mirror x to match the CSS scaleX(-1) on the video element.
       const x = canvas.width - rawX - w;
 
       // Glow box
@@ -161,10 +173,13 @@ function FaceOverlay({ faces, videoWidth, videoHeight }) {
   return (
     <canvas
       ref={canvasRef}
+      // width/height = native video pixels so coordinate space matches exactly.
       width={videoWidth}
       height={videoHeight}
       style={{
         position: "absolute", top: 0, left: 0,
+        // CSS size = 100% of the container, scaled up/down by the browser.
+        // This is separate from the canvas pixel dimensions above.
         width: "100%", height: "100%",
         pointerEvents: "none",
       }}
@@ -223,10 +238,6 @@ function StatsPanel({ faces, connected, fps }) {
   const emotion = primaryFace?.emotion || null;
   const meta = emotion ? EMOTION_META[emotion] : null;
   const probs = primaryFace?.probs || {};
-
-  const topEmotion = emotion
-    ? Object.entries(probs).sort((a, b) => b[1] - a[1])[0]
-    : null;
 
   return (
     <div style={{
@@ -390,7 +401,7 @@ function StatsPanel({ faces, connected, fps }) {
           DATASET: FER2013 · 28,709 imgs<br/>
           ACCURACY: 68.95% test<br/>
           CLASSES: 7 universal emotions<br/>
-          SMOOTHING: 8-frame window
+          SMOOTHING: 10-frame window
         </div>
       </div>
     </div>
@@ -403,11 +414,10 @@ export default function App() {
   const [faces, setFaces] = useState([]);
   const [fps, setFps] = useState(0);
   const fpsRef = useRef({ count: 0, last: performance.now() });
-  const [videoDims, setVideoDims] = useState({ w: 640, h: 480 });
+  const [videoDims, setVideoDims] = useState({ w: 1280, h: 720 });
 
   const handleMessage = useCallback((data) => {
     setFaces(data.faces || []);
-    // fps counter
     fpsRef.current.count++;
     const now = performance.now();
     if (now - fpsRef.current.last > 1000) {
@@ -419,17 +429,19 @@ export default function App() {
   const { send, connected } = useWebSocket(WS_URL, handleMessage);
   useFrameCapture(videoRef, ready, send, connected);
 
+  // Capture the native video pixel dimensions once the stream starts.
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
-    const onMeta = () => setVideoDims({ w: v.videoWidth, h: v.videoHeight });
+    const onMeta = () => {
+      setVideoDims({ w: v.videoWidth, h: v.videoHeight });
+    };
     v.addEventListener("loadedmetadata", onMeta);
     return () => v.removeEventListener("loadedmetadata", onMeta);
   }, [videoRef]);
 
   return (
     <>
-      {/* Google Fonts */}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=JetBrains+Mono:wght@400;600;700&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -518,7 +530,7 @@ export default function App() {
             overflow: "hidden",
             background: "#0a0f1e",
             border: "1px solid #1e293b",
-            aspectRatio: "4/3",
+            aspectRatio: "16/9",
             maxHeight: "calc(100vh - 140px)",
           }}>
 
@@ -557,7 +569,7 @@ export default function App() {
                     width: "100%", height: "100%",
                     objectFit: "cover",
                     display: "block",
-                    transform: "scaleX(-1)", // mirror
+                    transform: "scaleX(-1)", // mirror for natural selfie view
                     filter: ready ? "none" : "brightness(0)",
                     transition: "filter 0.5s",
                   }}
@@ -585,7 +597,6 @@ export default function App() {
                   }} />
                 ))}
 
-                {/* Not ready overlay */}
                 {!ready && (
                   <div style={{
                     position: "absolute", inset: 0,
@@ -613,4 +624,4 @@ export default function App() {
       </div>
     </>
   );
-}
+}x
