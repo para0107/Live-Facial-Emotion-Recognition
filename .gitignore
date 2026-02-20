@@ -4,3 +4,4 @@
 .idea
 checkpoints
 logs
+webapp/frontend/node_modules
