@@ -44,11 +44,15 @@ app.add_middleware(
 print(f"Loading checkpoint from: {CHECKPOINT}")
 predictor = EmotionPredictor(
     checkpoint_path=CHECKPOINT,
-    smoothing_window=8,
+    smoothing_window=10,  # matches native webcam.py default
 )
 print(f"Model loaded on {predictor.device}")
 
 face_detector = cv2.CascadeClassifier(HAAR)
+
+# CLAHE — normalizes local contrast on webcam crops to better match
+# the clean FER2013 training images, improving prediction quality
+clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
 
 
 def decode_frame(b64: str) -> np.ndarray:
@@ -87,6 +91,7 @@ async def websocket_endpoint(ws: WebSocket):
             results = []
             for (x, y, w, h) in faces:
                 face_crop = gray[y:y + h, x:x + w]
+                face_crop = clahe.apply(face_crop)  # contrast normalization
 
                 # predict_smoothed is the exact same method webcam.py calls
                 probs = predictor.predict_smoothed(face_crop)

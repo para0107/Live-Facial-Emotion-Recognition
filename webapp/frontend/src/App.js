@@ -90,7 +90,7 @@ function useFrameCapture(videoRef, ready, send, connected) {
       // Draw UNMIRRORED — server receives normal orientation
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(video, 0, 0);
-      const frame = canvas.toDataURL("image/jpeg", 0.7);
+      const frame = canvas.toDataURL("image/jpeg", 0.92);
       send({ frame });
     };
 
