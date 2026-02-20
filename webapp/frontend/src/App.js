@@ -24,7 +24,7 @@ function useWebcam() {
     (async () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          // DOWNGRADED: Changed from 1280/720 to 640/480 for faster processing
+          // DOWNGRADED: 640x480 for much faster processing on HF Spaces
           video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
           audio: false,
         });
@@ -65,7 +65,8 @@ function useWebSocket(url, onMessage) {
   return { send, connected };
 }
 
-function useFrameCapture(videoRef, ready, send, connected) {
+// NEW: Added isProcessingRef parameter to respect the "Ping-Pong" lock
+function useFrameCapture(videoRef, ready, send, connected, isProcessingRef) {
   const canvasRef = useRef(document.createElement("canvas"));
   const animRef = useRef(null);
   const lastSentRef = useRef(0);
@@ -77,26 +78,35 @@ function useFrameCapture(videoRef, ready, send, connected) {
 
     const loop = () => {
       animRef.current = requestAnimationFrame(loop);
+
+      // NEW: If the server is still processing the last frame, DO NOTHING.
+      if (isProcessingRef.current) return;
+
       const now = performance.now();
       if (now - lastSentRef.current < 80) return;
       lastSentRef.current = now;
+
       const video = videoRef.current;
       if (!video || video.readyState < 2) return;
       const W = video.videoWidth;
       const H = video.videoHeight;
       if (!W || !H) return;
+
       canvas.width = W;
       canvas.height = H;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(video, 0, 0);
 
-      // OPTIMIZED: Changed JPEG compression from 0.92 to 0.6 to reduce payload size
+      // NEW: Lock the pipeline until Hugging Face replies
+      isProcessingRef.current = true;
+
+      // OPTIMIZED: Changed JPEG compression from 0.92 to 0.6
       send({ frame: canvas.toDataURL("image/jpeg", 0.6) });
     };
 
     animRef.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animRef.current);
-  }, [ready, connected, send, videoRef]);
+  }, [ready, connected, send, videoRef, isProcessingRef]);
 }
 
 function FaceOverlay({ faces, videoWidth, videoHeight }) {
@@ -113,7 +123,6 @@ function FaceOverlay({ faces, videoWidth, videoHeight }) {
       const { x: rawX, y, w, h } = box;
       const x = canvas.width - rawX - w;
 
-      // Make uncertain boxes look slightly different if you want (e.g., using yellow like the local webcam script)
       const renderColor = is_uncertain ? "#c8c832" : meta.color;
       const renderGlow = is_uncertain ? "#c8c83240" : meta.glow;
 
@@ -136,7 +145,6 @@ function FaceOverlay({ faces, videoWidth, videoHeight }) {
         ctx.moveTo(x1, y1); ctx.lineTo(x3, y3); ctx.stroke();
       });
 
-      // Show dual label if uncertain, just like the local script
       let label = `${meta.emoji} ${meta.label} ${(confidence * 100).toFixed(0)}%`;
       if (is_uncertain && secondary_emotion) {
          const secMeta = EMOTION_META[secondary_emotion] || EMOTION_META.neutral;
@@ -289,6 +297,9 @@ export default function App() {
   const [videoDims, setVideoDims] = useState({ w: 640, h: 480 });
   const [mobile, setMobile] = useState(window.innerWidth < 768);
 
+  // NEW: Add a lock to prevent sending frames while the server is busy
+  const isProcessingRef = useRef(false);
+
   useEffect(() => {
     const onResize = () => setMobile(window.innerWidth < 768);
     window.addEventListener("resize", onResize);
@@ -297,6 +308,10 @@ export default function App() {
 
   const handleMessage = useCallback((data) => {
     setFaces(data.faces || []);
+
+    // NEW: Unlock! The server has replied, we can send the next frame
+    isProcessingRef.current = false;
+
     fpsRef.current.count++;
     const now = performance.now();
     if (now - fpsRef.current.last > 1000) {
@@ -306,7 +321,9 @@ export default function App() {
   }, []);
 
   const { send, connected } = useWebSocket(WS_URL, handleMessage);
-  useFrameCapture(videoRef, ready, send, connected);
+
+  // NEW: Pass the lock into our frame capture hook
+  useFrameCapture(videoRef, ready, send, connected, isProcessingRef);
 
   useEffect(() => {
     const v = videoRef.current;
