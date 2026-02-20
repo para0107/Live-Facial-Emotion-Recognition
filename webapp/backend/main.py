@@ -9,8 +9,6 @@ import cv2
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
-# ── Path setup ────────────────────────────────────────────────────────────────
-# __file__ = Live-FER/webapp/backend/main.py  →  3x dirname = Live-FER/
 PROJECT_ROOT = os.path.dirname(
     os.path.dirname(
         os.path.dirname(os.path.abspath(__file__))
@@ -21,14 +19,12 @@ sys.path.insert(0, FER_ROOT)
 
 from src.inference.predictor import EmotionPredictor
 
-# ── Constants ─────────────────────────────────────────────────────────────────
 CHECKPOINT = os.environ.get(
     "CHECKPOINT_PATH",
     os.path.join(FER_ROOT, "checkpoints", "best_model.pth")
 )
 HAAR = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 
-# ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="FER WebSocket API")
 
 app.add_middleware(
@@ -38,16 +34,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Model ─────────────────────────────────────────────────────────────────────
 print(f"Loading checkpoint from: {CHECKPOINT}")
 if not os.path.exists(CHECKPOINT):
     raise FileNotFoundError(f"Checkpoint not found: {CHECKPOINT}")
 
-# Identical instantiation to webcam.py:
-#   WebcamFER.__init__ → EmotionPredictor(checkpoint_path, smoothing_window=10)
+# Reduced from 10 → 5 frames.
+# A 10-frame window at ~12fps = ~833ms of inertia. Once the model sees a
+# genuine happy frame (e.g. a slight smile) it takes 10 more frames of
+# contrary evidence to shift — causing the "stuck on happy" effect.
+# 5 frames (~417ms) is still smooth enough to suppress jitter but reacts
+# fast enough to track real expression changes.
 predictor = EmotionPredictor(
     checkpoint_path=CHECKPOINT,
-    smoothing_window=10,
+    smoothing_window=5,
 )
 print(f"Model loaded on {predictor.device}")
 
@@ -55,13 +54,11 @@ face_detector = cv2.CascadeClassifier(HAAR)
 
 
 def decode_frame(b64: str) -> np.ndarray:
-    """Decode base64 JPEG from browser canvas into a BGR numpy array."""
     data = base64.b64decode(b64.split(",")[-1])
     img = Image.open(io.BytesIO(data)).convert("RGB")
     return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
 
 
-# ── WebSocket endpoint ────────────────────────────────────────────────────────
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
@@ -75,7 +72,6 @@ async def websocket_endpoint(ws: WebSocket):
             if not frame_b64:
                 continue
 
-            # ── Identical to WebcamFER._process_frame ─────────────────────────
             frame = decode_frame(frame_b64)
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
@@ -88,9 +84,6 @@ async def websocket_endpoint(ws: WebSocket):
 
             results = []
             for (x, y, w, h) in faces:
-                # Raw grayscale crop — NO extra preprocessing.
-                # predictor.predict() handles everything internally:
-                #   numpy → PIL.L → Resize(48) → ToTensor → Normalize(0.507, 0.255)
                 face_crop = gray[y:y + h, x:x + w]
                 probs = predictor.predict_smoothed(face_crop)
                 top_idx = int(np.argmax(probs))

@@ -25,8 +25,6 @@ function useWebcam() {
     (async () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          // Request higher resolution so the displayed feed is sharper.
-          // The browser will negotiate down if the camera can't do 1280×720.
           video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
         });
         if (videoRef.current) {
@@ -81,24 +79,17 @@ function useFrameCapture(videoRef, ready, send, connected) {
     const loop = () => {
       animRef.current = requestAnimationFrame(loop);
       const now = performance.now();
-      if (now - lastSentRef.current < 80) return; // ~12fps to server
+      if (now - lastSentRef.current < 80) return;
       lastSentRef.current = now;
       const video = videoRef.current;
       if (!video || video.readyState < 2) return;
-
-      // Always capture at the native video resolution, NOT the CSS display size.
-      // This is what the backend runs face detection on — we want full resolution.
       const W = video.videoWidth;
       const H = video.videoHeight;
       if (!W || !H) return;
       canvas.width = W;
       canvas.height = H;
-
-      // Draw UNMIRRORED — server receives normal (non-flipped) orientation.
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(video, 0, 0);
-
-      // Use quality 0.92 — good balance between sharpness and bandwidth.
       const frame = canvas.toDataURL("image/jpeg", 0.92);
       send({ frame });
     };
@@ -109,9 +100,6 @@ function useFrameCapture(videoRef, ready, send, connected) {
 }
 
 // ── Face overlay canvas ───────────────────────────────────────────────────────
-// FIX: The overlay canvas must be sized to the VIDEO's native pixel dimensions,
-// not the CSS layout dimensions. Otherwise box coordinates (which come from
-// detection on the native-res frame) are drawn at the wrong positions/scale.
 function FaceOverlay({ faces, videoWidth, videoHeight }) {
   const canvasRef = useRef(null);
 
@@ -124,10 +112,8 @@ function FaceOverlay({ faces, videoWidth, videoHeight }) {
     faces.forEach(({ box, emotion, confidence }) => {
       const meta = EMOTION_META[emotion] || EMOTION_META.neutral;
       const { x: rawX, y, w, h } = box;
-      // Mirror x to match the CSS scaleX(-1) on the video element.
       const x = canvas.width - rawX - w;
 
-      // Glow box
       ctx.shadowColor = meta.color;
       ctx.shadowBlur = 20;
       ctx.strokeStyle = meta.color;
@@ -135,7 +121,6 @@ function FaceOverlay({ faces, videoWidth, videoHeight }) {
       ctx.strokeRect(x, y, w, h);
       ctx.shadowBlur = 0;
 
-      // Corner marks
       const cLen = 18;
       ctx.lineWidth = 4;
       [
@@ -152,7 +137,6 @@ function FaceOverlay({ faces, videoWidth, videoHeight }) {
         ctx.stroke();
       });
 
-      // Label pill
       const label = `${meta.emoji}  ${meta.label}  ${(confidence * 100).toFixed(0)}%`;
       ctx.font = "bold 13px 'JetBrains Mono', monospace";
       const tw = ctx.measureText(label).width;
@@ -173,13 +157,10 @@ function FaceOverlay({ faces, videoWidth, videoHeight }) {
   return (
     <canvas
       ref={canvasRef}
-      // width/height = native video pixels so coordinate space matches exactly.
       width={videoWidth}
       height={videoHeight}
       style={{
         position: "absolute", top: 0, left: 0,
-        // CSS size = 100% of the container, scaled up/down by the browser.
-        // This is separate from the canvas pixel dimensions above.
         width: "100%", height: "100%",
         pointerEvents: "none",
       }}
@@ -195,36 +176,26 @@ function EmotionBar({ emotion, value, isTop }) {
     <div style={{ marginBottom: 6 }}>
       <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 3 }}>
         <span style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: 11,
+          fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
           color: isTop ? meta.color : "#64748b",
-          fontWeight: isTop ? 700 : 400,
-          letterSpacing: "0.08em",
+          fontWeight: isTop ? 700 : 400, letterSpacing: "0.08em",
         }}>
           {meta.emoji} {meta.label}
         </span>
         <span style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: 11,
+          fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
           color: isTop ? meta.color : "#475569",
         }}>
           {pct}%
         </span>
       </div>
-      <div style={{
-        height: 4,
-        background: "#1e293b",
-        borderRadius: 2,
-        overflow: "hidden",
-      }}>
+      <div style={{ height: 4, background: "#1e293b", borderRadius: 2, overflow: "hidden" }}>
         <div style={{
-          height: "100%",
-          width: `${pct}%`,
+          height: "100%", width: `${pct}%`,
           background: isTop
             ? `linear-gradient(90deg, ${meta.color}99, ${meta.color})`
             : "#334155",
-          borderRadius: 2,
-          transition: "width 0.15s ease",
+          borderRadius: 2, transition: "width 0.15s ease",
           boxShadow: isTop ? `0 0 8px ${meta.color}80` : "none",
         }} />
       </div>
@@ -240,168 +211,108 @@ function StatsPanel({ faces, connected, fps }) {
   const probs = primaryFace?.probs || {};
 
   return (
-    <div style={{
-      width: 280,
-      display: "flex",
-      flexDirection: "column",
-      gap: 16,
-      flexShrink: 0,
-    }}>
-      {/* Connection status */}
+    <div style={{ width: 280, display: "flex", flexDirection: "column", gap: 16, flexShrink: 0 }}>
       <div style={{
-        background: "#0f172a",
-        border: "1px solid #1e293b",
-        borderRadius: 12,
-        padding: "12px 16px",
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
+        background: "#0f172a", border: "1px solid #1e293b", borderRadius: 12,
+        padding: "12px 16px", display: "flex", alignItems: "center", gap: 10,
       }}>
         <div style={{
-          width: 8, height: 8,
-          borderRadius: "50%",
+          width: 8, height: 8, borderRadius: "50%",
           background: connected ? "#22c55e" : "#ef4444",
           boxShadow: connected ? "0 0 8px #22c55e" : "0 0 8px #ef4444",
           animation: connected ? "pulse 2s infinite" : "none",
         }} />
         <span style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: 11,
-          color: connected ? "#22c55e" : "#ef4444",
-          letterSpacing: "0.1em",
+          fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
+          color: connected ? "#22c55e" : "#ef4444", letterSpacing: "0.1em",
         }}>
           {connected ? "CONNECTED" : "OFFLINE"}
         </span>
         <span style={{
-          marginLeft: "auto",
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: 10,
-          color: "#334155",
+          marginLeft: "auto", fontFamily: "'JetBrains Mono', monospace",
+          fontSize: 10, color: "#334155",
         }}>
           {fps} FPS
         </span>
       </div>
 
-      {/* Primary emotion display */}
       <div style={{
         background: "#0f172a",
         border: `1px solid ${meta ? meta.color + "40" : "#1e293b"}`,
-        borderRadius: 12,
-        padding: 20,
-        textAlign: "center",
-        minHeight: 120,
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        transition: "border-color 0.3s",
+        borderRadius: 12, padding: 20, textAlign: "center", minHeight: 120,
+        display: "flex", flexDirection: "column", alignItems: "center",
+        justifyContent: "center", transition: "border-color 0.3s",
         boxShadow: meta ? `0 0 30px ${meta.glow}` : "none",
       }}>
         {emotion ? (
           <>
-            <div style={{ fontSize: 48, marginBottom: 8, lineHeight: 1 }}>
-              {meta.emoji}
-            </div>
+            <div style={{ fontSize: 48, marginBottom: 8, lineHeight: 1 }}>{meta.emoji}</div>
             <div style={{
-              fontFamily: "'Space Mono', monospace",
-              fontSize: 22,
-              fontWeight: 700,
-              color: meta.color,
-              letterSpacing: "0.15em",
+              fontFamily: "'Space Mono', monospace", fontSize: 22, fontWeight: 700,
+              color: meta.color, letterSpacing: "0.15em",
               textShadow: `0 0 20px ${meta.color}`,
             }}>
               {meta.label}
             </div>
             <div style={{
-              fontFamily: "'JetBrains Mono', monospace",
-              fontSize: 12,
-              color: "#475569",
-              marginTop: 6,
+              fontFamily: "'JetBrains Mono', monospace", fontSize: 12,
+              color: "#475569", marginTop: 6,
             }}>
               {(primaryFace.confidence * 100).toFixed(1)}% confidence
             </div>
           </>
         ) : (
           <div style={{
-            fontFamily: "'JetBrains Mono', monospace",
-            fontSize: 12,
-            color: "#334155",
-            letterSpacing: "0.1em",
+            fontFamily: "'JetBrains Mono', monospace", fontSize: 12,
+            color: "#334155", letterSpacing: "0.1em",
           }}>
             {connected ? "NO FACE DETECTED" : "WAITING FOR SERVER"}
           </div>
         )}
       </div>
 
-      {/* Probability bars */}
       <div style={{
-        background: "#0f172a",
-        border: "1px solid #1e293b",
-        borderRadius: 12,
-        padding: "16px 16px 12px",
+        background: "#0f172a", border: "1px solid #1e293b",
+        borderRadius: 12, padding: "16px 16px 12px",
       }}>
         <div style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: 10,
-          color: "#334155",
-          letterSpacing: "0.15em",
-          marginBottom: 12,
+          fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+          color: "#334155", letterSpacing: "0.15em", marginBottom: 12,
         }}>
           PROBABILITY DISTRIBUTION
         </div>
         {EMOTIONS.map(em => (
-          <EmotionBar
-            key={em}
-            emotion={em}
-            value={probs[em] || 0}
-            isTop={em === emotion}
-          />
+          <EmotionBar key={em} emotion={em} value={probs[em] || 0} isTop={em === emotion} />
         ))}
       </div>
 
-      {/* Face count */}
       <div style={{
-        background: "#0f172a",
-        border: "1px solid #1e293b",
-        borderRadius: 12,
-        padding: "12px 16px",
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
+        background: "#0f172a", border: "1px solid #1e293b", borderRadius: 12,
+        padding: "12px 16px", display: "flex", justifyContent: "space-between", alignItems: "center",
       }}>
         <span style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: 10,
-          color: "#334155",
-          letterSpacing: "0.1em",
+          fontFamily: "'JetBrains Mono', monospace", fontSize: 10,
+          color: "#334155", letterSpacing: "0.1em",
         }}>FACES DETECTED</span>
         <span style={{
-          fontFamily: "'Space Mono', monospace",
-          fontSize: 20,
-          fontWeight: 700,
+          fontFamily: "'Space Mono', monospace", fontSize: 20, fontWeight: 700,
           color: faces.length > 0 ? "#e2e8f0" : "#334155",
         }}>{faces.length}</span>
       </div>
 
-      {/* Model info */}
       <div style={{
-        background: "#0f172a",
-        border: "1px solid #1e293b",
-        borderRadius: 12,
-        padding: "12px 16px",
+        background: "#0f172a", border: "1px solid #1e293b",
+        borderRadius: 12, padding: "12px 16px",
       }}>
         <div style={{
-          fontFamily: "'JetBrains Mono', monospace",
-          fontSize: 9,
-          color: "#1e3a5f",
-          letterSpacing: "0.1em",
-          lineHeight: 1.8,
+          fontFamily: "'JetBrains Mono', monospace", fontSize: 9,
+          color: "#1e3a5f", letterSpacing: "0.1em", lineHeight: 1.8,
         }}>
           MODEL: ResNet-18 (fine-tuned)<br/>
           DATASET: FER2013 · 28,709 imgs<br/>
           ACCURACY: 68.95% test<br/>
           CLASSES: 7 universal emotions<br/>
-          SMOOTHING: 10-frame window
+          SMOOTHING: 5-frame window
         </div>
       </div>
     </div>
@@ -429,13 +340,10 @@ export default function App() {
   const { send, connected } = useWebSocket(WS_URL, handleMessage);
   useFrameCapture(videoRef, ready, send, connected);
 
-  // Capture the native video pixel dimensions once the stream starts.
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
-    const onMeta = () => {
-      setVideoDims({ w: v.videoWidth, h: v.videoHeight });
-    };
+    const onMeta = () => setVideoDims({ w: v.videoWidth, h: v.videoHeight });
     v.addEventListener("loadedmetadata", onMeta);
     return () => v.removeEventListener("loadedmetadata", onMeta);
   }, [videoRef]);
@@ -446,143 +354,82 @@ export default function App() {
         @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=JetBrains+Mono:wght@400;600;700&display=swap');
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body { background: #020617; }
-        @keyframes pulse {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0.4; }
-        }
-        @keyframes scanline {
-          0% { transform: translateY(-100%); }
-          100% { transform: translateY(100vh); }
-        }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        @keyframes scanline { 0% { transform: translateY(-100%); } 100% { transform: translateY(100vh); } }
       `}</style>
 
       <div style={{
-        minHeight: "100vh",
-        background: "#020617",
-        display: "flex",
-        flexDirection: "column",
-        fontFamily: "'JetBrains Mono', monospace",
-        color: "#e2e8f0",
-        overflow: "hidden",
+        minHeight: "100vh", background: "#020617", display: "flex",
+        flexDirection: "column", fontFamily: "'JetBrains Mono', monospace",
+        color: "#e2e8f0", overflow: "hidden",
       }}>
-
-        {/* Header */}
         <div style={{
-          padding: "16px 32px",
-          borderBottom: "1px solid #0f172a",
-          display: "flex",
-          alignItems: "center",
-          gap: 16,
-          background: "#020617",
-          position: "relative",
-          zIndex: 10,
+          padding: "16px 32px", borderBottom: "1px solid #0f172a",
+          display: "flex", alignItems: "center", gap: 16,
+          background: "#020617", position: "relative", zIndex: 10,
         }}>
           <div style={{
             width: 8, height: 32,
-            background: "linear-gradient(180deg, #3b82f6, #8b5cf6)",
-            borderRadius: 2,
+            background: "linear-gradient(180deg, #3b82f6, #8b5cf6)", borderRadius: 2,
           }} />
           <div>
             <div style={{
-              fontFamily: "'Space Mono', monospace",
-              fontSize: 16,
-              fontWeight: 700,
-              color: "#f1f5f9",
-              letterSpacing: "0.1em",
+              fontFamily: "'Space Mono', monospace", fontSize: 16, fontWeight: 700,
+              color: "#f1f5f9", letterSpacing: "0.1em",
             }}>
               LIVE FACIAL EMOTION RECOGNITION
             </div>
-            <div style={{
-              fontSize: 10,
-              color: "#334155",
-              letterSpacing: "0.15em",
-              marginTop: 2,
-            }}>
+            <div style={{ fontSize: 10, color: "#334155", letterSpacing: "0.15em", marginTop: 2 }}>
               ResNet-18 · Transfer Learning · FER2013 · Real-Time WebSocket Inference
             </div>
           </div>
           <div style={{ marginLeft: "auto", display: "flex", gap: 8 }}>
             {["angry", "happy", "surprise"].map(em => (
               <div key={em} style={{
-                width: 8, height: 8,
-                borderRadius: "50%",
-                background: EMOTION_META[em].color,
-                opacity: 0.6,
+                width: 8, height: 8, borderRadius: "50%",
+                background: EMOTION_META[em].color, opacity: 0.6,
               }} />
             ))}
           </div>
         </div>
 
-        {/* Main content */}
-        <div style={{
-          flex: 1,
-          display: "flex",
-          gap: 24,
-          padding: 24,
-          alignItems: "flex-start",
-        }}>
-
-          {/* Video area */}
+        <div style={{ flex: 1, display: "flex", gap: 24, padding: 24, alignItems: "flex-start" }}>
           <div style={{
-            flex: 1,
-            position: "relative",
-            borderRadius: 16,
-            overflow: "hidden",
-            background: "#0a0f1e",
-            border: "1px solid #1e293b",
-            aspectRatio: "16/9",
-            maxHeight: "calc(100vh - 140px)",
+            flex: 1, position: "relative", borderRadius: 16, overflow: "hidden",
+            background: "#0a0f1e", border: "1px solid #1e293b",
+            aspectRatio: "16/9", maxHeight: "calc(100vh - 140px)",
           }}>
-
-            {/* Scanline effect */}
             <div style={{
-              position: "absolute", top: 0, left: 0, right: 0,
-              height: "2px",
+              position: "absolute", top: 0, left: 0, right: 0, height: "2px",
               background: "linear-gradient(90deg, transparent, #3b82f620, transparent)",
-              zIndex: 5,
-              animation: "scanline 4s linear infinite",
-              pointerEvents: "none",
+              zIndex: 5, animation: "scanline 4s linear infinite", pointerEvents: "none",
             }} />
 
             {error ? (
               <div style={{
-                position: "absolute", inset: 0,
-                display: "flex", flexDirection: "column",
-                alignItems: "center", justifyContent: "center",
-                gap: 12,
+                position: "absolute", inset: 0, display: "flex", flexDirection: "column",
+                alignItems: "center", justifyContent: "center", gap: 12,
               }}>
                 <div style={{ fontSize: 40 }}>📷</div>
                 <div style={{
-                  fontFamily: "'JetBrains Mono', monospace",
-                  fontSize: 12, color: "#ef4444",
-                  letterSpacing: "0.1em",
+                  fontFamily: "'JetBrains Mono', monospace", fontSize: 12,
+                  color: "#ef4444", letterSpacing: "0.1em",
                 }}>{error}</div>
               </div>
             ) : (
               <>
                 <video
                   ref={videoRef}
-                  autoPlay
-                  playsInline
-                  muted
+                  autoPlay playsInline muted
                   style={{
-                    width: "100%", height: "100%",
-                    objectFit: "cover",
-                    display: "block",
-                    transform: "scaleX(-1)", // mirror for natural selfie view
-                    filter: ready ? "none" : "brightness(0)",
-                    transition: "filter 0.5s",
+                    width: "100%", height: "100%", objectFit: "cover", display: "block",
+                    transform: "scaleX(-1)",
+                    filter: ready ? "none" : "brightness(0)", transition: "filter 0.5s",
                   }}
                 />
                 {ready && (
-                  <FaceOverlay
-                    faces={faces}
-                    videoWidth={videoDims.w}
-                    videoHeight={videoDims.h}
-                  />
+                  <FaceOverlay faces={faces} videoWidth={videoDims.w} videoHeight={videoDims.h} />
                 )}
-
-                {/* Corner decorations */}
                 {["top-left", "top-right", "bottom-left", "bottom-right"].map(pos => (
                   <div key={pos} style={{
                     position: "absolute",
@@ -596,19 +443,14 @@ export default function App() {
                     pointerEvents: "none",
                   }} />
                 ))}
-
                 {!ready && (
                   <div style={{
-                    position: "absolute", inset: 0,
-                    display: "flex", alignItems: "center",
-                    justifyContent: "center",
-                    background: "#020617",
+                    position: "absolute", inset: 0, display: "flex",
+                    alignItems: "center", justifyContent: "center", background: "#020617",
                   }}>
                     <div style={{
-                      fontFamily: "'JetBrains Mono', monospace",
-                      fontSize: 11, color: "#1e293b",
-                      letterSpacing: "0.2em",
-                      animation: "pulse 1.5s infinite",
+                      fontFamily: "'JetBrains Mono', monospace", fontSize: 11,
+                      color: "#1e293b", letterSpacing: "0.2em", animation: "pulse 1.5s infinite",
                     }}>
                       INITIALIZING CAMERA...
                     </div>
@@ -618,10 +460,9 @@ export default function App() {
             )}
           </div>
 
-          {/* Stats panel */}
           <StatsPanel faces={faces} connected={connected} fps={fps} />
         </div>
       </div>
     </>
   );
-}x
+}

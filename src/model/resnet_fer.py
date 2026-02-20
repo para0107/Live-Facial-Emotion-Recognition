@@ -24,11 +24,10 @@ class ResNetFER(nn.Module):
             new_conv.weight = nn.Parameter(old_conv.weight.mean(dim=1, keepdim=True))
         backbone.conv1 = new_conv
 
-        # CRITICAL: Remove maxpool entirely.
-        # On 48×48 inputs the default 3×3 stride-2 maxpool (on top of the
-        # stride-2 conv1) destroys spatial resolution too aggressively.
-        # Replace with Identity so feature maps stay at 24×24 after conv1.
-        backbone.maxpool = nn.Identity()
+        # NOTE: The checkpoint was trained with this MaxPool2d, NOT nn.Identity().
+        # Do not change this without retraining — the architecture must match
+        # exactly what was used when best_model.pth was saved.
+        backbone.maxpool = nn.MaxPool2d(kernel_size=2, stride=1, padding=0)
 
         # Remove the final FC layer — replaced with our own head below.
         in_features = backbone.fc.in_features  # 512 for ResNet-18
@@ -53,7 +52,6 @@ class ResNetFER(nn.Module):
     def freeze_backbone(self):
         for param in self.features.parameters():
             param.requires_grad = False
-        # Always keep layer4 trainable — it's the most task-specific layer.
         for param in self.features.layer4.parameters():
             param.requires_grad = True
 
