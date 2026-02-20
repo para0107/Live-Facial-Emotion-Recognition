@@ -345,7 +345,7 @@ Expected: model attends to mouth/cheeks for `happy`, brow region for `angry`, ey
 | + Label smoothing ε=0.1 | ~67% | Better calibration |
 | + Class-weighted loss | ~67-68% | Disgust F1 improves significantly |
 | + Random erasing p=0.3 | ~69% | Holistic features |
-| + Staged freeze/unfreeze | **~69-70%** | **Final configuration** |
+| + Staged freeze/unfreeze | **~70-71%** | **Final configuration** |
 
 *Human accuracy on FER2013 ≈ 65%. Results vary across random seeds.*
 
