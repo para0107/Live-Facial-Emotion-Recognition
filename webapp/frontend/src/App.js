@@ -24,7 +24,8 @@ function useWebcam() {
     (async () => {
       try {
         stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: "user" },
+          // DOWNGRADED: Changed from 1280/720 to 640/480 for faster processing
+          video: { width: { ideal: 640 }, height: { ideal: 480 }, facingMode: "user" },
           audio: false,
         });
         if (videoRef.current) {
@@ -88,7 +89,9 @@ function useFrameCapture(videoRef, ready, send, connected) {
       canvas.height = H;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(video, 0, 0);
-      send({ frame: canvas.toDataURL("image/jpeg", 0.92) });
+
+      // OPTIMIZED: Changed JPEG compression from 0.92 to 0.6 to reduce payload size
+      send({ frame: canvas.toDataURL("image/jpeg", 0.6) });
     };
 
     animRef.current = requestAnimationFrame(loop);
@@ -105,20 +108,24 @@ function FaceOverlay({ faces, videoWidth, videoHeight }) {
     const ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-    faces.forEach(({ box, emotion, confidence }) => {
+    faces.forEach(({ box, emotion, confidence, is_uncertain, secondary_emotion, secondary_confidence }) => {
       const meta = EMOTION_META[emotion] || EMOTION_META.neutral;
       const { x: rawX, y, w, h } = box;
       const x = canvas.width - rawX - w;
 
-      ctx.shadowColor = meta.color;
-      ctx.shadowBlur = 16;
-      ctx.strokeStyle = meta.color;
-      ctx.lineWidth = 2;
+      // Make uncertain boxes look slightly different if you want (e.g., using yellow like the local webcam script)
+      const renderColor = is_uncertain ? "#c8c832" : meta.color;
+      const renderGlow = is_uncertain ? "#c8c83240" : meta.glow;
+
+      ctx.shadowColor = renderColor;
+      ctx.shadowBlur = is_uncertain ? 8 : 16;
+      ctx.strokeStyle = renderColor;
+      ctx.lineWidth = is_uncertain ? 1 : 2;
       ctx.strokeRect(x, y, w, h);
       ctx.shadowBlur = 0;
 
       const cLen = 14;
-      ctx.lineWidth = 3;
+      ctx.lineWidth = is_uncertain ? 2 : 3;
       [
         [x, y, x + cLen, y, x, y + cLen],
         [x + w - cLen, y, x + w, y, x + w, y + cLen],
@@ -129,12 +136,18 @@ function FaceOverlay({ faces, videoWidth, videoHeight }) {
         ctx.moveTo(x1, y1); ctx.lineTo(x3, y3); ctx.stroke();
       });
 
-      const label = `${meta.emoji} ${meta.label} ${(confidence * 100).toFixed(0)}%`;
+      // Show dual label if uncertain, just like the local script
+      let label = `${meta.emoji} ${meta.label} ${(confidence * 100).toFixed(0)}%`;
+      if (is_uncertain && secondary_emotion) {
+         const secMeta = EMOTION_META[secondary_emotion] || EMOTION_META.neutral;
+         label = `${meta.label}/${secMeta.label} ${(confidence * 100).toFixed(0)}%/${(secondary_confidence * 100).toFixed(0)}%`;
+      }
+
       ctx.font = "bold 12px monospace";
       const tw = ctx.measureText(label).width;
       const pillX = x;
       const pillY = y > 30 ? y - 28 : y + h + 4;
-      ctx.fillStyle = meta.color + "dd";
+      ctx.fillStyle = renderColor + "dd";
       ctx.beginPath();
       ctx.roundRect(pillX, pillY, tw + 16, 22, 4);
       ctx.fill();
@@ -273,7 +286,7 @@ export default function App() {
   const [faces, setFaces] = useState([]);
   const [fps, setFps] = useState(0);
   const fpsRef = useRef({ count: 0, last: performance.now() });
-  const [videoDims, setVideoDims] = useState({ w: 1280, h: 720 });
+  const [videoDims, setVideoDims] = useState({ w: 640, h: 480 });
   const [mobile, setMobile] = useState(window.innerWidth < 768);
 
   useEffect(() => {
