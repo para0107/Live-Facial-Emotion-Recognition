@@ -86,17 +86,18 @@ class WebcamFER:
         if not cap.isOpened():
             raise RuntimeError('Cannot open webcam. Check device connection.')
 
-        # Request 1280x720 — camera will use best available resolution
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        # Back to 640x480 — this matches what the model was trained/validated on.
+        # Higher resolution crops resize differently to 48x48 and shift predictions.
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
         actual_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         actual_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         print(f'Webcam FER running at {actual_w}x{actual_h}. Press Q to quit, R to reset buffer.')
 
-        # WINDOW_NORMAL lets user resize; start at native camera resolution
+        # WINDOW_NORMAL so the window can be resized freely on screen
         cv2.namedWindow('Facial Emotion Recognition', cv2.WINDOW_NORMAL)
-        cv2.resizeWindow('Facial Emotion Recognition', actual_w, actual_h)
+        cv2.resizeWindow('Facial Emotion Recognition', actual_w * 2, actual_h * 2)
 
         while True:
             ret, frame = cap.read()
