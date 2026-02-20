@@ -83,8 +83,12 @@ function useFrameCapture(videoRef, ready, send, connected) {
       lastSentRef.current = now;
       const video = videoRef.current;
       if (!video || video.readyState < 2) return;
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      const W = video.videoWidth;
+      const H = video.videoHeight;
+      canvas.width = W;
+      canvas.height = H;
+      // Draw UNMIRRORED — server receives normal orientation
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.drawImage(video, 0, 0);
       const frame = canvas.toDataURL("image/jpeg", 0.7);
       send({ frame });
@@ -107,7 +111,9 @@ function FaceOverlay({ faces, videoWidth, videoHeight }) {
 
     faces.forEach(({ box, emotion, confidence }) => {
       const meta = EMOTION_META[emotion] || EMOTION_META.neutral;
-      const { x, y, w, h } = box;
+      const { x: rawX, y, w, h } = box;
+      // Mirror x to match CSS scaleX(-1) on the video element
+      const x = canvas.width - rawX - w;
 
       // Glow box
       ctx.shadowColor = meta.color;
