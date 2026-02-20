@@ -36,7 +36,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 1. Load configuration (Same idea as run_webcam.py)
+# 1. Load configuration dynamically
 print(f"Loading config from: {CONFIG_PATH}")
 try:
     with open(CONFIG_PATH) as f:
@@ -45,7 +45,7 @@ try:
 except FileNotFoundError:
     print(f"Warning: {CONFIG_PATH} not found. Falling back to default values.")
     inf_cfg = {
-        'smoothing_window': 10,
+        'smoothing_window': 5,
         'face_scale_factor': 1.1,
         'face_min_neighbors': 5,
         'face_min_size': [30, 30],
@@ -58,7 +58,7 @@ print(f"Loading checkpoint from: {CHECKPOINT}")
 if not os.path.exists(CHECKPOINT):
     raise FileNotFoundError(f"Checkpoint not found: {CHECKPOINT}")
 
-# 2. Use dynamic smoothing window
+# 2. Setup Predictor
 predictor = EmotionPredictor(
     checkpoint_path=CHECKPOINT,
     smoothing_window=inf_cfg['smoothing_window'],
@@ -87,10 +87,10 @@ async def websocket_endpoint(ws: WebSocket):
             if not frame_b64:
                 continue
 
+            # The frame arriving here is already 640x480 because of the frontend update!
             frame = decode_frame(frame_b64)
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-            # 3. Use dynamic face detection parameters
             faces = face_detector.detectMultiScale(
                 gray,
                 scaleFactor=inf_cfg['face_scale_factor'],
@@ -103,7 +103,7 @@ async def websocket_endpoint(ws: WebSocket):
                 face_crop = gray[y:y + h, x:x + w]
                 probs = predictor.predict_smoothed(face_crop)
 
-                # 4. Apply Uncertainty Thresholding (Same idea as webcam.py)
+                # 3. Apply Uncertainty Thresholding to match the webcam script
                 sorted_idx = np.argsort(probs)[::-1]
                 top_idx = int(sorted_idx[0])
                 top_class = predictor.class_names[top_idx]
