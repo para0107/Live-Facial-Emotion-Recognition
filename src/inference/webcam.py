@@ -18,7 +18,7 @@ EMOTION_COLORS = {
 
 
 class WebcamFER:
-    def __init__(self, checkpoint_path, smoothing_window=5, scale_factor=1.1,
+    def __init__(self, checkpoint_path, smoothing_window=10, scale_factor=1.1,
                  min_neighbors=5, min_size=(30, 30), confidence_threshold=0.3):
         self.predictor = EmotionPredictor(
             checkpoint_path=checkpoint_path,
