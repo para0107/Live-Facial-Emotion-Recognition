@@ -19,7 +19,6 @@ PROJECT_ROOT = os.path.dirname(
 FER_ROOT = os.environ.get("FER_ROOT", PROJECT_ROOT)
 sys.path.insert(0, FER_ROOT)
 
-# Use the EXACT same predictor as webcam.py — guaranteed identical pipeline
 from src.inference.predictor import EmotionPredictor
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -28,7 +27,6 @@ CHECKPOINT = os.environ.get(
     os.path.join(FER_ROOT, "checkpoints", "best_model.pth")
 )
 HAAR = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
-CLASSES = ["angry", "disgust", "fear", "happy", "neutral", "sad", "surprise"]
 
 # ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="FER WebSocket API")
@@ -40,23 +38,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ── Model — loaded once at startup using EmotionPredictor (same as webcam.py) ─
+# ── Model ─────────────────────────────────────────────────────────────────────
 print(f"Loading checkpoint from: {CHECKPOINT}")
+if not os.path.exists(CHECKPOINT):
+    raise FileNotFoundError(f"Checkpoint not found: {CHECKPOINT}")
+
+# Identical instantiation to webcam.py:
+#   WebcamFER.__init__ → EmotionPredictor(checkpoint_path, smoothing_window=10)
 predictor = EmotionPredictor(
     checkpoint_path=CHECKPOINT,
-    smoothing_window=10,  # matches native webcam.py default
+    smoothing_window=10,
 )
 print(f"Model loaded on {predictor.device}")
 
 face_detector = cv2.CascadeClassifier(HAAR)
 
-# CLAHE — normalizes local contrast on webcam crops to better match
-# the clean FER2013 training images, improving prediction quality
-clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
-
 
 def decode_frame(b64: str) -> np.ndarray:
-    """Decode base64 JPEG from browser into a BGR numpy array."""
+    """Decode base64 JPEG from browser canvas into a BGR numpy array."""
     data = base64.b64decode(b64.split(",")[-1])
     img = Image.open(io.BytesIO(data)).convert("RGB")
     return cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
@@ -66,7 +65,6 @@ def decode_frame(b64: str) -> np.ndarray:
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
-    # Reset smoothing buffer per client connection
     predictor.reset_buffer()
 
     try:
@@ -77,7 +75,7 @@ async def websocket_endpoint(ws: WebSocket):
             if not frame_b64:
                 continue
 
-            # Decode to BGR numpy array
+            # ── Identical to WebcamFER._process_frame ─────────────────────────
             frame = decode_frame(frame_b64)
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
@@ -90,10 +88,10 @@ async def websocket_endpoint(ws: WebSocket):
 
             results = []
             for (x, y, w, h) in faces:
+                # Raw grayscale crop — NO extra preprocessing.
+                # predictor.predict() handles everything internally:
+                #   numpy → PIL.L → Resize(48) → ToTensor → Normalize(0.507, 0.255)
                 face_crop = gray[y:y + h, x:x + w]
-                face_crop = clahe.apply(face_crop)  # contrast normalization
-
-                # predict_smoothed is the exact same method webcam.py calls
                 probs = predictor.predict_smoothed(face_crop)
                 top_idx = int(np.argmax(probs))
                 top_class = predictor.class_names[top_idx]
@@ -127,5 +125,5 @@ def health():
         "status": "ok",
         "device": str(predictor.device),
         "checkpoint": CHECKPOINT,
-        "model": "ResNet-18 FER (EmotionPredictor)",
+        "model": "ResNet-18 FER",
     }
