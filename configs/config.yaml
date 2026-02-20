@@ -23,6 +23,7 @@ training:
 inference:
   smoothing_window: 10
   confidence_threshold: 0.3
+  uncertainty_threshold: 0.40   # below this → show top-2 emotions as "A / B  34% / 28%"
   face_scale_factor: 1.1
   face_min_neighbors: 5
   face_min_size: [30, 30]

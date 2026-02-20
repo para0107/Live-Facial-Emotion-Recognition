@@ -31,6 +31,7 @@ def main():
         min_neighbors=inf_cfg['face_min_neighbors'],
         min_size=tuple(inf_cfg['face_min_size']),
         confidence_threshold=inf_cfg['confidence_threshold'],
+        uncertainty_threshold=inf_cfg.get('uncertainty_threshold', 0.40),
     )
 
     app.run()
