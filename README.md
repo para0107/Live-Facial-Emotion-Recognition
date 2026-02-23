@@ -1,4 +1,3 @@
-
 # 🎭 Facial Emotion Recognition
 
 <div align="center">
@@ -6,13 +5,15 @@
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)
 ![OpenCV](https://img.shields.io/badge/OpenCV-4.8+-5C3EE8?style=for-the-badge&logo=opencv&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.100+-009688?style=for-the-badge&logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-18.2+-61DAFB?style=for-the-badge&logo=react&logoColor=black)
 ![License](https://img.shields.io/badge/License-MIT-22C55E?style=for-the-badge)
 ![Status](https://img.shields.io/badge/Status-Active-22C55E?style=for-the-badge)
 
-**Real-time facial emotion recognition from webcam using a fine-tuned ResNet-18.**
-7 universal emotion classes · Temporal smoothing · Grad-CAM visualization · Class-balanced training.
+**Real-time facial emotion recognition from webcam using a fine-tuned ResNet-18.**  
+7 universal emotion classes · Temporal smoothing · Uncertainty visualization · WebSocket inference · Deployable web app.
 
-[Overview](#-overview) · [Architecture](#-architecture) · [Setup](#-setup) · [Training](#-training) · [Inference](#-real-time-inference) · [Results](#-results) · [References](#-references)
+[Overview](#-overview) · [Architecture](#-architecture) · [Setup](#-setup) · [Training](#-training) · [Inference](#-real-time-inference) · [Web App](#-web-app) · [Results](#-results) · [References](#-references)
 
 </div>
 
@@ -20,9 +21,9 @@
 
 ## 📖 Overview
 
-This project implements a complete end-to-end pipeline for **real-time Facial Emotion Recognition (FER)** — from raw dataset to live webcam inference. Every component is built and owned: data loading and augmentation, transfer learning fine-tuning, loss function design for class imbalance, and a live inference loop with temporal smoothing.
+This project implements a complete end-to-end pipeline for **real-time Facial Emotion Recognition (FER)** — from raw dataset to live webcam inference and a deployable web application. Every component is built from scratch: data loading and augmentation, transfer learning fine-tuning, loss function design for class imbalance, a live inference loop with temporal smoothing, and a React + FastAPI web app with WebSocket streaming.
 
-**What this is not:** a wrapper around a cloud API. Every design decision — which layers to freeze, how to handle the `disgust` class having 16× fewer samples than `happy`, why temporal smoothing over 10 frames matters — is implemented and justified from first principles, grounded in the academic literature.
+**What this is not:** a wrapper around a cloud API. Every design decision — which layers to freeze, how to handle the `disgust` class having 16× fewer samples than `happy`, why temporal smoothing over 10 frames matters, when to show uncertainty labels — is implemented and justified from first principles, grounded in the academic literature.
 
 ### Recognized Emotions
 
@@ -65,7 +66,9 @@ The pipeline follows a modular, sequential design:
 ┌──────────────────────────────────────────────────────────────────┐
 │                      ResNet-18 BACKBONE                           │
 │                                                                    │
-│   Conv1(1→64, 3×3, s=1) ──► BN ──► ReLU                         │
+│   Conv1(1→64, 7×7, s=2) ──► BN ──► ReLU                         │
+│         │                                                          │
+│   MaxPool2d(kernel=2, stride=1, padding=0)  ← modified           │
 │         │                                                          │
 │       Layer1 (2× BasicBlock, 64ch)                                │
 │         │                                                          │
@@ -86,7 +89,7 @@ The pipeline follows a modular, sequential design:
               │   BatchNorm1d → ReLU            │
               │   Dropout(0.25)                 │
               │   Linear(256 → 7)               │
-              │   Softmax                       │
+              │   [raw logits — no Softmax]     │
               └────────────────┬───────────────┘
                                │
                                ▼
@@ -98,6 +101,14 @@ The pipeline follows a modular, sequential design:
               └────────────────┬───────────────┘
                                │
                                ▼
+          ┌───────────────────────────────────────────────┐
+          │  UNCERTAINTY CHECK  (threshold = 0.40)         │
+          │  top_conf < 0.40 → show top-2 emotions         │
+          │  e.g.  "NEUTRAL / ANGRY  34% / 28%"            │
+          │  Bounding box rendered in muted yellow         │
+          └───────────────────────────────────────────────┘
+                               │
+                               ▼
           ┌───────────────────────────────────────┐
           │  OVERLAY: label · confidence · bars    │
           └───────────────────────────────────────┘
@@ -105,20 +116,22 @@ The pipeline follows a modular, sequential design:
 
 ### Key Design Choices
 
-**Grayscale single-channel input.** FER2013 is grayscale by nature. Processing in grayscale halves memory, speeds training, and avoids the model learning spurious color correlations. The first `Conv1` layer is adapted to accept 1-channel input with Kaiming initialization.
+**Grayscale single-channel input.** FER2013 is grayscale by nature. Processing in grayscale halves memory, speeds training, and avoids the model learning spurious color correlations. The first `Conv1` layer is adapted to accept 1-channel input by averaging the pretrained ImageNet weights across the 3 input channels (`new_conv.weight = old_conv.weight.mean(dim=1, keepdim=True)`), which preserves the magnitude of learned features.
 
-**MaxPool removed.** The standard ResNet-18 uses a 7×7 conv with stride 2 followed by a 3×3 maxpool, which aggressively downsamples early feature maps. For a 48×48 input this reduces spatial resolution too aggressively. `maxpool` is replaced with `nn.Identity()`.
+**Modified MaxPool.** The standard ResNet-18 uses a 3×3 maxpool with stride 2 after `conv1`, which aggressively downsamples early feature maps. For a 48×48 input this reduces spatial resolution too aggressively. `maxpool` is replaced with `MaxPool2d(kernel_size=2, stride=1, padding=0)` — a softer spatial reduction that retains more low-level detail. **Important:** the saved checkpoint `best_model.pth` was trained with this exact configuration. Do not swap it for `nn.Identity()` without retraining.
 
 **Staged unfreezing.** Backbone frozen for the first 5 epochs while only the head trains. Then the full network unfreezes with CosineAnnealingLR. This prevents the large early gradients from the randomly-initialized head from destroying pretrained ImageNet features.
 
 **Label smoothing + class weights.** FER2013 is severely imbalanced (`disgust`: 436 samples vs `happy`: 7,215). Hard one-hot labels combined with this imbalance cause the model to ignore minority classes. Label smoothing (ε=0.1) distributes probability mass across non-target classes, and per-class weights inversely proportional to class frequency are folded into the loss.
+
+**Uncertainty visualization.** The model is a closed-set classifier — it always outputs a distribution over 7 classes even when the input is ambiguous. When `max(softmax) < 0.40`, the top-2 emotions are shown together (e.g. `NEUTRAL / ANGRY  34% / 28%`) and the bounding box turns muted yellow. This is a direct response to the known neutral/angry confusion in FER2013 and reflects the literature on closed-set classifier limitations.
 
 ---
 
 ## 📁 Project Structure
 
 ```
-fer_project/
+Live-FER/
 │
 ├── configs/
 │   └── config.yaml              # Single source of truth for all hyperparameters
@@ -160,10 +173,24 @@ fer_project/
 ├── scripts/
 │   ├── train.py                 # Training entry point
 │   ├── evaluate.py              # Test-set evaluation + confusion matrix export
-│   └── run_webcam.py            # Live inference entry point
+│   └── run_webcam.py            # Local live inference entry point
+│
+├── webapp/
+│   ├── backend/
+│   │   ├── app.py               # FastAPI WebSocket server (Hugging Face Spaces)
+│   │   └── main.py              # FastAPI WebSocket server (Railway / local)
+│   └── frontend/
+│       ├── src/
+│       │   ├── App.js           # React app — webcam capture, WebSocket client, overlay
+│       │   └── index.js
+│       ├── .env                 # ws://localhost:8000/ws
+│       ├── .env.production      # wss://para0107-live-fer-backend.hf.space/ws
+│       ├── package.json
+│       └── vercel.json          # Vercel deployment config
 │
 ├── checkpoints/                 # Saved .pth files (not tracked)
 ├── logs/                        # TensorBoard runs + exported figures
+├── Dockerfile                   # For Hugging Face Spaces (port 7860)
 ├── requirements.txt
 └── README.md
 ```
@@ -176,7 +203,7 @@ fer_project/
 
 ```bash
 git clone https://github.com/para0107/Live-Facial-Emotion-Recognition
-cd fer_project
+cd Live-FER
 
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
@@ -217,7 +244,7 @@ Place the extracted `train/` and `test/` folders inside `data/fer2013/`.
 | surprise  | 3,171  | 831   | 11.0%      | 2.19        |
 | **Total** | **28,709** | **7,178** | — | — |
 
-Class weights are computed automatically: `w_c = N_total / (C × N_c)`
+Class weights are computed automatically in `dataset.py`: `w_c = N_total / (C × N_c)`
 
 ---
 
@@ -248,6 +275,7 @@ All hyperparameters live in `configs/config.yaml`.
 | Label smoothing | 0.1 | Prevents overconfident predictions |
 | Random erasing | p=0.3 | Forces holistic facial feature use |
 | Early stopping | patience=10 | |
+| Uncertainty threshold | 0.40 | Below this → show top-2 emotions |
 
 ### Monitor with TensorBoard
 
@@ -279,13 +307,14 @@ Outputs per-class precision, recall, F1 and saves `logs/confusion_matrix.png`.
 **Most common confusions on FER2013:**
 - `fear` ↔ `sad` (both involve downturned features)
 - `disgust` ↔ `angry` (both involve brow lowering)
+- `neutral` ↔ `angry` (subtle activation; motivates the uncertainty display)
 - `surprise` ↔ `fear` (both involve widened eyes)
 
 These reflect genuine perceptual ambiguity — human accuracy on FER2013 is estimated at ~65%.
 
 ---
 
-## 🎥 Real-Time Inference
+## 🎥 Real-Time Inference (Local Webcam)
 
 ```bash
 python scripts/run_webcam.py --checkpoint checkpoints/best_model.pth
@@ -300,9 +329,9 @@ python scripts/run_webcam.py --checkpoint checkpoints/best_model.pth
 
 ### Display elements
 
-- Bounding box colored by dominant emotion
-- Label + confidence above the box
-- 7-class probability bar chart in frame corner
+- Bounding box colored by dominant emotion (muted yellow when uncertain)
+- Label + confidence above the box; dual label when `confidence < 0.40`
+- 7-class probability bar chart positioned beside the face box
 - Face count bottom-left
 
 ### Temporal smoothing
@@ -317,6 +346,50 @@ Eliminates jitter from micro-expressions and brief detection instabilities witho
 
 ---
 
+## 🌐 Web App
+
+A full-stack web application is included in `webapp/`, allowing browser-based real-time inference over a WebSocket connection.
+
+### Stack
+
+| Layer | Technology |
+|-------|------------|
+| Frontend | React 18, Canvas API |
+| Backend | FastAPI, WebSocket |
+| Deployment (backend) | Hugging Face Spaces (port 7860) |
+| Deployment (frontend) | Vercel |
+
+### How it works
+
+1. The React frontend captures webcam frames at 640×480 via `getUserMedia`
+2. Frames are JPEG-encoded (quality 0.6) and sent over WebSocket as base64
+3. A **ping-pong lock** prevents frame flooding: the next frame is only sent after the server has replied, naturally adapting to server load
+4. The FastAPI backend runs Haar Cascade detection and `EmotionPredictor.predict_smoothed()` on each frame
+5. Results (bounding boxes, per-class probabilities, uncertainty flag) are returned as JSON
+6. The frontend renders bounding boxes and probability bars on a `<canvas>` overlay
+
+### Running locally
+
+**Backend:**
+```bash
+cd webapp/backend
+uvicorn main:app --host 0.0.0.0 --port 8000
+```
+
+**Frontend:**
+```bash
+cd webapp/frontend
+npm install
+npm start
+# Connects to ws://localhost:8000/ws by default
+```
+
+### Uncertainty in the web app
+
+The backend applies the same `uncertainty_threshold = 0.40` as the local webcam script. When `top_conf < 0.40`, the response includes both `emotion` + `secondary_emotion` and sets `is_uncertain: true`. The frontend renders a muted yellow box and a split label such as `NEUTRAL/ANGRY 34%/28%`.
+
+---
+
 ## 🔬 Grad-CAM Visualization
 
 ```python
@@ -324,14 +397,14 @@ from src.model.cam import CAMExtractor
 from src.model.resnet_fer import ResNetFER
 
 model = ResNetFER(pretrained=False)
-# load checkpoint ...
+# load checkpoint...
 
 extractor = CAMExtractor(model)
-cam, predicted_class = extractor.generate_cam(input_tensor, target_class=3)  # 3=happy
+cam, predicted_class = extractor.generate_cam(input_tensor, target_class=3)  # 3 = happy
 overlay = extractor.overlay_cam(original_image, cam)
 ```
 
-Expected: model attends to mouth/cheeks for `happy`, brow region for `angry`, eye region for `fear`/`surprise`. Diffuse or non-facial attention maps indicate the model is learning dataset artifacts.
+The hook is registered on `model.features.layer4`. Expected behavior: the model attends to mouth/cheeks for `happy`, brow region for `angry`, eye region for `fear`/`surprise`. Diffuse or non-facial attention maps indicate the model is learning dataset artifacts.
 
 ---
 
@@ -343,9 +416,9 @@ Expected: model attends to mouth/cheeks for `happy`, brow region for `angry`, ey
 | ResNet-18, no pretrain, scratch | ~52% | Overfits quickly |
 | ResNet-18, pretrained, full fine-tune | ~65% | Near human-level |
 | + Label smoothing ε=0.1 | ~67% | Better calibration |
-| + Class-weighted loss | ~67-68% | Disgust F1 improves significantly |
-| + Random erasing p=0.3 | ~69% | Holistic features |
-| + Staged freeze/unfreeze | **~70-71%** | **Final configuration** |
+| + Class-weighted loss | ~67–68% | Disgust F1 improves significantly |
+| + Random erasing p=0.3 | ~68% | Holistic features |
+| **+ Staged freeze/unfreeze (final)** | **68.95%** | **Saved checkpoint** |
 
 *Human accuracy on FER2013 ≈ 65%. Results vary across random seeds.*
 
