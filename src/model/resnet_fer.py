@@ -24,12 +24,11 @@ class ResNetFER(nn.Module):
             new_conv.weight = nn.Parameter(old_conv.weight.mean(dim=1, keepdim=True))
         backbone.conv1 = new_conv
 
-        # NOTE: The checkpoint was trained with this MaxPool2d, NOT nn.Identity().
         # Do not change this without retraining — the architecture must match
         # exactly what was used when best_model.pth was saved.
         backbone.maxpool = nn.MaxPool2d(kernel_size=2, stride=1, padding=0)
 
-        # Remove the final FC layer — replaced with our own head below.
+        # Remove the final FC layer — replaced with my own head below.
         in_features = backbone.fc.in_features  # 512 for ResNet-18
         backbone.fc = nn.Identity()
 
