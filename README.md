@@ -364,7 +364,7 @@ A full-stack web application is included in `webapp/`, allowing browser-based re
 1. The React frontend captures webcam frames at 640×480 via `getUserMedia`
 2. Frames are JPEG-encoded (quality 0.6) and sent over WebSocket as base64
 3. A **ping-pong lock** prevents frame flooding: the next frame is only sent after the server has replied, naturally adapting to server load
-4. The FastAPI backend runs Haar Cascade detection and `EmotionPredictor.predict_smoothed()` on each frame
+4. The FastAPI backend runs Haar Cascade detection and the shared `FaceAnalyzer` (per-face tracking and smoothing) on each frame
 5. Results (bounding boxes, per-class probabilities, uncertainty flag) are returned as JSON
 6. The frontend renders bounding boxes and probability bars on a `<canvas>` overlay
 

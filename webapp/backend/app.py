@@ -18,13 +18,12 @@ PROJECT_ROOT = os.path.dirname(
 FER_ROOT = os.environ.get("FER_ROOT", PROJECT_ROOT)
 sys.path.insert(0, FER_ROOT)
 
-from src.inference.predictor import EmotionPredictor
+from src.inference.analyzer import CONFIDENCE_DECIMALS, setup_face_analyzer
 
 CHECKPOINT = os.environ.get(
     "CHECKPOINT_PATH",
     os.path.join(FER_ROOT, "checkpoints", "best_model.pth")
 )
-HAAR = cv2.data.haarcascades + "haarcascade_frontalface_default.xml"
 CONFIG_PATH = os.path.join(FER_ROOT, 'configs', 'config.yaml')
 
 app = FastAPI(title="FER WebSocket API")
@@ -49,7 +48,9 @@ except FileNotFoundError:
         'face_scale_factor': 1.1,
         'face_min_neighbors': 5,
         'face_min_size': [30, 30],
-        'uncertainty_threshold': 0.40
+        'uncertainty_threshold': 0.40,
+        'face_iou_threshold': 0.3,
+        'face_max_missed_frames': 5
     }
 
 UNCERTAINTY_THRESHOLD = inf_cfg.get('uncertainty_threshold', 0.40)
@@ -58,14 +59,9 @@ print(f"Loading checkpoint from: {CHECKPOINT}")
 if not os.path.exists(CHECKPOINT):
     raise FileNotFoundError(f"Checkpoint not found: {CHECKPOINT}")
 
-# 2. Setup Predictor
-predictor = EmotionPredictor(
-    checkpoint_path=CHECKPOINT,
-    smoothing_window=inf_cfg['smoothing_window'],
-)
-print(f"Model loaded on {predictor.device}")
-
-face_detector = cv2.CascadeClassifier(HAAR)
+# 2. Setup shared face analyzer
+analyzer = setup_face_analyzer(CHECKPOINT, inf_cfg)
+print(f"Model loaded on {analyzer.device}")
 
 
 def decode_frame(b64: str) -> np.ndarray:
@@ -77,7 +73,7 @@ def decode_frame(b64: str) -> np.ndarray:
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
-    predictor.reset_buffer()
+    analyzer.reset()
 
     try:
         while True:
@@ -91,45 +87,21 @@ async def websocket_endpoint(ws: WebSocket):
             frame = decode_frame(frame_b64)
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-            faces = face_detector.detectMultiScale(
-                gray,
-                scaleFactor=inf_cfg['face_scale_factor'],
-                minNeighbors=inf_cfg['face_min_neighbors'],
-                minSize=tuple(inf_cfg['face_min_size']),
-            )
-
             results = []
-            for (x, y, w, h) in faces:
-                face_crop = gray[y:y + h, x:x + w]
-                probs = predictor.predict_smoothed(face_crop)
-
-                # 3. Apply Uncertainty Thresholding to match the webcam script
-                sorted_idx = np.argsort(probs)[::-1]
-                top_idx = int(sorted_idx[0])
-                top_class = predictor.class_names[top_idx]
-                top_conf = round(float(probs[top_idx]), 4)
-
-                is_uncertain = top_conf < UNCERTAINTY_THRESHOLD
-
-                second_class = None
-                second_conf = None
-
-                if is_uncertain:
-                    second_idx = int(sorted_idx[1])
-                    second_class = predictor.class_names[second_idx]
-                    second_conf = round(float(probs[second_idx]), 4)
-
+            for face in analyzer.analyze_frame(gray):
+                x, y, w, h = face.box
                 results.append({
-                    "box": {"x": int(x), "y": int(y), "w": int(w), "h": int(h)},
+                    "face_id": face.face_id,
+                    "box": {"x": x, "y": y, "w": w, "h": h},
                     "probs": {
-                        predictor.class_names[i]: round(float(probs[i]), 4)
-                        for i in range(len(predictor.class_names))
+                        name: round(float(face.probs[i]), CONFIDENCE_DECIMALS)
+                        for i, name in enumerate(analyzer.class_names)
                     },
-                    "emotion": top_class,
-                    "confidence": top_conf,
-                    "is_uncertain": is_uncertain,
-                    "secondary_emotion": second_class,
-                    "secondary_confidence": second_conf
+                    "emotion": face.emotion,
+                    "confidence": face.confidence,
+                    "is_uncertain": face.is_uncertain,
+                    "secondary_emotion": face.secondary_emotion,
+                    "secondary_confidence": face.secondary_confidence
                 })
 
             await ws.send_text(json.dumps({
@@ -149,7 +121,7 @@ async def websocket_endpoint(ws: WebSocket):
 def health():
     return {
         "status": "ok",
-        "device": str(predictor.device),
+        "device": str(analyzer.device),
         "checkpoint": CHECKPOINT,
         "model": "ResNet-18 FER",
         "smoothing_window": inf_cfg['smoothing_window'],
