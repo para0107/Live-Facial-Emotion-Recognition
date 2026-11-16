@@ -1,6 +1,8 @@
 from collections import deque
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+
+import numpy as np
 
 Box = tuple[int, int, int, int]
 
@@ -9,7 +11,7 @@ Box = tuple[int, int, int, int]
 class TrackedFace:
     face_id: int
     box: Box
-    probs_history: deque = field(default_factory=deque)
+    probs_history: deque[np.ndarray]
     missed_frames: int = 0
 
 

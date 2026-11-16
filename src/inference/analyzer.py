@@ -99,7 +99,6 @@ class FaceAnalyzer:
 
 
 def setup_face_analyzer(checkpoint_path: str, inference_config: dict) -> FaceAnalyzer:
-    """Build the predictor, Haar detector and tracker from the inference config."""
     return FaceAnalyzer(
         predictor=EmotionPredictor(checkpoint_path=checkpoint_path),
         face_detector=cv2.CascadeClassifier(HAAR_CASCADE_PATH),

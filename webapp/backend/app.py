@@ -18,7 +18,7 @@ PROJECT_ROOT = os.path.dirname(
 FER_ROOT = os.environ.get("FER_ROOT", PROJECT_ROOT)
 sys.path.insert(0, FER_ROOT)
 
-from src.inference.analyzer import setup_face_analyzer
+from src.inference.analyzer import CONFIDENCE_DECIMALS, setup_face_analyzer
 
 CHECKPOINT = os.environ.get(
     "CHECKPOINT_PATH",
@@ -94,7 +94,7 @@ async def websocket_endpoint(ws: WebSocket):
                     "face_id": face.face_id,
                     "box": {"x": x, "y": y, "w": w, "h": h},
                     "probs": {
-                        name: round(float(face.probs[i]), 4)
+                        name: round(float(face.probs[i]), CONFIDENCE_DECIMALS)
                         for i, name in enumerate(analyzer.class_names)
                     },
                     "emotion": face.emotion,
