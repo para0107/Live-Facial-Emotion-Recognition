@@ -1,3 +1,4 @@
+import pytest
 import torch
 from src.model.resnet_fer import ResNetFER
 
@@ -16,3 +17,11 @@ def test_no_softmax():
     x = torch.randn(1, 1, 48, 48)
     out = model(x)
     assert not torch.allclose(out.sum(), torch.tensor(1.0)), "Output should be logits, not probabilities"
+
+
+def test_rejects_three_channel_input():
+    model = ResNetFER(num_classes=7, pretrained=False)
+    model.eval()
+    x = torch.randn(1, 3, 48, 48)
+    with pytest.raises(RuntimeError):
+        model(x)
