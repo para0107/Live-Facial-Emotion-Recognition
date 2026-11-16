@@ -27,6 +27,8 @@ inference:
   face_scale_factor: 1.1
   face_min_neighbors: 5
   face_min_size: [30, 30]
+  face_iou_threshold: 0.3
+  face_max_missed_frames: 5
 
 classes:
   - angry

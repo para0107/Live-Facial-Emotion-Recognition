@@ -1,10 +1,7 @@
 import cv2
-import numpy as np
 
-from src.inference.predictor import EmotionPredictor
+from src.inference.analyzer import setup_face_analyzer
 from src.utils.visualization import draw_emotion_bar
-
-HAAR_CASCADE_PATH = cv2.data.haarcascades + 'haarcascade_frontalface_default.xml'
 
 EMOTION_COLORS = {
     'angry':    (0,   0,   220),
@@ -19,64 +16,33 @@ EMOTION_COLORS = {
 # Color used when the model is uncertain (max prob < uncertainty_threshold)
 UNCERTAIN_COLOR = (200, 200, 50)   # muted yellow — visually distinct from all emotion colors
 
-UNCERTAINTY_THRESHOLD = 0.40       # can also be driven from config
-
 
 class WebcamFER:
-    def __init__(self, checkpoint_path, smoothing_window=10, scale_factor=1.1,
-                 min_neighbors=5, min_size=(30, 30), confidence_threshold=0.3,
-                 uncertainty_threshold=UNCERTAINTY_THRESHOLD):
-        self.predictor = EmotionPredictor(
-            checkpoint_path=checkpoint_path,
-            smoothing_window=smoothing_window
-        )
-        self.face_detector = cv2.CascadeClassifier(HAAR_CASCADE_PATH)
-        self.scale_factor = scale_factor
-        self.min_neighbors = min_neighbors
-        self.min_size = min_size
-        self.confidence_threshold = confidence_threshold
-        self.uncertainty_threshold = uncertainty_threshold
+    def __init__(self, checkpoint_path, inference_config):
+        self.analyzer = setup_face_analyzer(checkpoint_path, inference_config)
+        self.uncertainty_threshold = inference_config['uncertainty_threshold']
 
-    def _detect_faces(self, gray_frame):
-        return self.face_detector.detectMultiScale(
-            gray_frame,
-            scaleFactor=self.scale_factor,
-            minNeighbors=self.min_neighbors,
-            minSize=self.min_size,
-        )
-
-    def _build_label(self, probs, class_names):
+    def _build_label(self, face):
         """
-        Return (label_text, box_color, is_uncertain).
+        Return (label_text, box_color) for a FaceAnalysis.
 
-        Uncertain  → max(prob) < uncertainty_threshold
-                     Label shows top-2: "NEUTRAL / ANGRY  34% / 28%"
+        Uncertain  → Label shows top-2: "NEUTRAL / ANGRY  34% / 28%"
                      Box drawn in UNCERTAIN_COLOR.
 
         Confident  → single label: "HAPPY  87%"
                      Box drawn in the emotion's own color.
         """
-        sorted_idx = np.argsort(probs)[::-1]   # descending
-        top_idx   = int(sorted_idx[0])
-        top_class = class_names[top_idx]
-        top_conf  = float(probs[top_idx])
-
-        is_uncertain = top_conf < self.uncertainty_threshold
-
-        if is_uncertain:
-            second_idx   = int(sorted_idx[1])
-            second_class = class_names[second_idx]
-            second_conf  = float(probs[second_idx])
+        if face.is_uncertain:
             label = (
-                f'{top_class.upper()} / {second_class.upper()}'
-                f'  {top_conf:.0%} / {second_conf:.0%}'
+                f'{face.emotion.upper()} / {face.secondary_emotion.upper()}'
+                f'  {face.confidence:.0%} / {face.secondary_confidence:.0%}'
             )
             color = UNCERTAIN_COLOR
         else:
-            label = f'{top_class.upper()}  {top_conf:.0%}'
-            color = EMOTION_COLORS.get(top_class, (255, 255, 255))
+            label = f'{face.emotion.upper()}  {face.confidence:.0%}'
+            color = EMOTION_COLORS.get(face.emotion, (255, 255, 255))
 
-        return label, color, is_uncertain
+        return label, color
 
     def _draw_label(self, frame, label, color, x, y, w, h):
         font = cv2.FONT_HERSHEY_SIMPLEX
@@ -96,17 +62,15 @@ class WebcamFER:
 
     def _process_frame(self, frame):
         gray  = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = self._detect_faces(gray)
+        faces = self.analyzer.analyze_frame(gray)
         fh, fw = frame.shape[:2]
 
-        for (x, y, w, h) in faces:
-            face_crop = gray[y:y + h, x:x + w]
-            probs     = self.predictor.predict_smoothed(face_crop)
-
-            label, color, is_uncertain = self._build_label(probs, self.predictor.class_names)
+        for face in faces:
+            x, y, w, h = face.box
+            label, color = self._build_label(face)
 
             # Bounding box — thinner for uncertain, normal for confident
-            box_thickness = 1 if is_uncertain else 2
+            box_thickness = 1 if face.is_uncertain else 2
             cv2.rectangle(frame, (x, y), (x + w, y + h), color, box_thickness)
 
             self._draw_label(frame, label, color, x, y, w, h)
@@ -120,7 +84,7 @@ class WebcamFER:
                 bar_x = 10
             bar_y = max(y, 10)
 
-            draw_emotion_bar(frame, probs, self.predictor.class_names,
+            draw_emotion_bar(frame, face.probs, self.analyzer.class_names,
                              x=bar_x, y=bar_y, bar_width=140, bar_height=16)
 
         cv2.putText(frame, f'Faces: {len(faces)}', (10, fh - 10),
@@ -160,7 +124,7 @@ class WebcamFER:
             if key == ord('q'):
                 break
             elif key == ord('r'):
-                self.predictor.reset_buffer()
+                self.analyzer.reset()
                 print('Buffer reset.')
 
         cap.release()
